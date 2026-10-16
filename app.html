@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Арт-Гид: Памятники ВОВ Минска</title>
+
+  <!-- 1. Подключаем TensorFlow.js и Teachable Machine прямо в браузер (без серверов!) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f1f5f9;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+      color: #0f172a;
+    }
+    .card {
+      background: #ffffff;
+      max-width: 440px;
+      margin: 0 auto;
+      padding: 24px;
+      border-radius: 20px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.07);
+    }
+    h1 { font-size: 20px; margin-top: 0; margin-bottom: 6px; }
+    p.subtitle { color: #64748b; font-size: 13px; margin-top: 0; margin-bottom: 20px; }
+    .btn {
+      background: #4f46e5;
+      color: white;
+      padding: 14px 20px;
+      border-radius: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      border: none;
+      font-size: 15px;
+      width: 100%;
+      box-sizing: border-box;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #4338ca; }
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #334155;
+      margin-top: 10px;
+    }
+    .btn-secondary:hover { background: #cbd5e1; }
+    #previewImg {
+      max-width: 100%;
+      border-radius: 12px;
+      margin-top: 15px;
+      display: none;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    #status {
+      margin-top: 15px;
+      font-weight: bold;
+      font-size: 13px;
+      color: #4f46e5;
+      display: none;
+    }
+    #resultCard {
+      margin-top: 18px;
+      text-align: left;
+      background: #eef2ff;
+      border-left: 4px solid #4f46e5;
+      padding: 16px;
+      border-radius: 10px;
+      display: none;
+    }
+    .fact-box {
+      background: #fef3c7;
+      color: #92400e;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-top: 10px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+    .btn-audio {
+      background: #e0e7ff;
+      color: #3730a3;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: bold;
+      border: none;
+      cursor: pointer;
+      margin-top: 12px;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>🏛️ Памятники ВОВ Минска</h1>
+    <p class="subtitle">Работает прямо в браузере (БЕЗ Python и БЕЗ серверов)</p>
+
+    <!-- 
+      Главный секрет мобильной камеры:
+      capture="environment" нативно открывает тыловую камеру смартфона 
+      на любом iPhone (Safari) и Android (Chrome)!
+    -->
+    <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display: none;">
+    <button class="btn" onclick="document.getElementById('cameraInput').click()">📸 Открыть камеру смартфона</button>
+    
+    <button class="btn btn-secondary" onclick="document.getElementById('fileInput').click()">📁 Загрузить фото из файлов</button>
+    <input type="file" id="fileInput" accept="image/*" style="display: none;">
+
+    <img id="previewImg" alt="Предпросмотр снимка">
+    <div id="status">⏳ Загрузка нейросети в браузер...</div>
+
+    <!-- Карточка с результатом -->
+    <div id="resultCard">
+      <h2 id="resTitle" style="margin-top: 0; font-size: 17px; color: #0f172a;"></h2>
+      <p id="resCity" style="font-weight: bold; color: #4f46e5; margin: 4px 0; font-size: 13px;"></p>
+      <p id="resDesc" style="color: #334155; font-size: 13px; line-height: 1.5; margin: 8px 0;"></p>
+      <div id="resFact" class="fact-box"></div>
+      <button class="btn-audio" onclick="speakText()">🔊 Озвучить аудиогид</button>
+    </div>
+  </div>
+
+  <script>
+    // 2. Ссылка на модель из Teachable Machine:
+    // Когда школьники обучат модель на teachablemachine.withgoogle.com,
+    // они нажимают "Export Model" -> "TensorFlow.js" -> "Upload (shareable link)".
+    // Полученную ссылку вставляют сюда:
+    const MODEL_URL = "https://teachablemachine.withgoogle.com/models/hAuKxpZjh/";
+    // Либо если файлы model.json и metadata.json лежат в той же папке на диске:
+    // const MODEL_URL = "./";
+
+    // 3. База знаний о 5 памятниках Минска и Минской области
+    const MONUMENTS = {
+      "monument_1": {
+        title: "Монумент Победы на площади Победы",
+        city: "Минск, площадь Победы",
+        year: "1954 год",
+        desc: "38-метровый гранитный обелиск с орденом «Победа» и священным Вечным огнем у подножия.",
+        fact: "Вечный огонь зажег генерал Алексей Бурдейный, чьи танки первыми освободили Минск в 1944 г."
+      },
+      "monument_2": {
+        title: "Мемориальный комплекс «Курган Славы»",
+        city: "Минская область, Смолевичский р-н",
+        year: "1969 год",
+        desc: "35-метровый рукотворный курган с 4 штыками в честь освободительной операции «Багратион».",
+        fact: "Четыре штыка символизируют 4 фронта, замкнувших Минский котел со 105-тысячной группировкой врага."
+      },
+      "monument_3": {
+        title: "Музей истории ВОВ и стела «Минск — город-герой»",
+        city: "Минск, проспект Победителей",
+        year: "1985 / 2014 год",
+        desc: "Фасад в виде 11 лучей салюта Победы рядом с 45-метровым обелиском Родины-матери.",
+        fact: "11 лучей фасада символизируют 1100 дней фашистской оккупации Минска."
+      },
+      "monument_4": {
+        title: "Мемориальный комплекс «Хатынь»",
+        city: "Минская область, Логойский р-н",
+        year: "1969 год",
+        desc: "Всемирно известный памятник сожженной деревне со скульптурой «Непокорённый человек».",
+        fact: "Каждые 30 секунд в Хатыни синхронно бьют колокола на месте 26 сожженных печных труб."
+      },
+      "monument_5": {
+        title: "Памятник-танк Т-34 у Дома офицеров",
+        city: "Минск, ул. Красноармейская",
+        year: "1952 год",
+        desc: "Танк Т-34 в честь танкистов 4-й гвардейской танковой бригады, первыми освободивших Минск.",
+        fact: "День освобождения Минска танкистами (3 июля) стал Днем Независимости Республики Беларусь."
+      }
+    };
+
+    let model, maxPredictions;
+
+    // Загрузка модели в оперативную память браузера
+    async function loadModel() {
+      if (!model) {
+        const modelURL = MODEL_URL + "model.json";
+        const metadataURL = MODEL_URL + "metadata.json";
+        model = await tmImage.load(modelURL, metadataURL);
+        maxPredictions = model.getTotalClasses();
+      }
+    }
+
+    // Обработка сделанного снимка
+    async function processPhoto(file) {
+      if (!file) return;
+
+      const preview = document.getElementById('previewImg');
+      preview.src = URL.createObjectURL(file);
+      preview.style.display = 'block';
+      document.getElementById('resultCard').style.display = 'none';
+
+      const status = document.getElementById('status');
+      status.style.display = 'block';
+      status.innerText = "⏳ Загрузка нейросети в браузер...";
+
+      try {
+        await loadModel();
+        status.innerText = "🔍 Анализ кадра через TensorFlow.js...";
+
+        // Предсказание нейросети прямо в браузере!
+        const predictions = await model.predict(preview);
+        status.style.display = 'none';
+
+        // Ищем класс с максимальной вероятностью
+        let bestClass = "";
+        let highestProb = 0;
+        for (let i = 0; i < maxPredictions; i++) {
+          if (predictions[i].probability > highestProb) {
+            highestProb = predictions[i].probability;
+            bestClass = predictions[i].className;
+          }
+        }
+
+        const confidencePercent = Math.round(highestProb * 100);
+
+        // Порог уверенности 70%
+        if (highestProb >= 0.70 && MONUMENTS[bestClass]) {
+          const item = MONUMENTS[bestClass];
+          document.getElementById('resultCard').style.display = 'block';
+          document.getElementById('resTitle').innerText = item.title + " (" + confidencePercent + "%)";
+          document.getElementById('resCity').innerText = item.city + " • " + item.year;
+          document.getElementById('resDesc').innerText = item.desc;
+          document.getElementById('resFact').innerHTML = "💡 <b>Факт:</b> " + item.fact;
+        } else {
+          alert("Памятник не распознан (" + confidencePercent + "%). Сфотографируйте объект ближе.");
+        }
+      } catch (err) {
+        status.style.display = 'none';
+        alert("Ошибка загрузки модели. Проверьте подключение к интернету или ссылку на модель.");
+        console.error(err);
+      }
+    }
+
+    // Слушатели событий на кнопки камеры и файлов
+    document.getElementById('cameraInput').addEventListener('change', function() { processPhoto(this.files[0]); });
+    document.getElementById('fileInput').addEventListener('change', function() { processPhoto(this.files[0]); });
+
+    // Озвучка экскурсии стандартным браузерным синтезатором речи
+    function speakText() {
+      const title = document.getElementById('resTitle').innerText;
+      const desc = document.getElementById('resDesc').innerText;
+      const utterance = new SpeechSynthesisUtterance(title + ". " + desc);
+      utterance.lang = "ru-RU";
+      window.speechSynthesis.speak(utterance);
+    }
+  </script>
+</body>
+</html>
